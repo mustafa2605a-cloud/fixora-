@@ -27,7 +27,7 @@ export function ServiceCard({ service }: { service: ServiceCategory }) {
           <h3 className="font-heading text-lg font-semibold">{service.name}</h3>
           <span className="inline-flex items-center gap-1 text-sm font-medium">
             <Star className="size-4 fill-primary text-primary" aria-hidden="true" />
-            {service.rating}
+            {service.rating ?? 'New'}
           </span>
         </div>
         <p className="text-sm leading-relaxed text-muted-foreground">{service.short}</p>

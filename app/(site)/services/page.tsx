@@ -1,14 +1,17 @@
 import type { Metadata } from 'next'
 import { ServiceCard } from '@/components/site/service-card'
 import { CtaBanner, SectionHeading } from '@/components/site/home-sections'
-import { services } from '@/lib/data'
+import { getCatalog } from '@/lib/catalog'
 
 export const metadata: Metadata = {
   title: 'Services',
   description: 'Plumbing, electrical, AC repair, cleaning, carpentry and painting from verified Fixora professionals.',
 }
 
-export default function ServicesPage() {
+export const revalidate = 60
+
+export default async function ServicesPage() {
+  const services = await getCatalog()
   return (
     <>
       <section className="mx-auto max-w-6xl px-4 py-16 md:px-6">

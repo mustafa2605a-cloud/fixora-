@@ -5,23 +5,27 @@ import { notFound } from 'next/navigation'
 import { Check, Clock, ShieldCheck, Star } from 'lucide-react'
 import { buttonVariants } from '@/components/ui/button'
 import { ServiceIcon } from '@/components/service-icon'
-import { formatCurrency, getService, services } from '@/lib/data'
+import { formatCurrency } from '@/lib/data'
+import { getCatalog, getServiceBySlug } from '@/lib/catalog'
 import { cn } from '@/lib/utils'
 
-export function generateStaticParams() {
+export const revalidate = 60
+
+export async function generateStaticParams() {
+  const services = await getCatalog().catch(() => [])
   return services.map((s) => ({ slug: s.slug }))
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params
-  const service = getService(slug)
+  const service = await getServiceBySlug(slug)
   if (!service) return {}
   return { title: service.name, description: service.description }
 }
 
 export default async function ServiceDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
-  const service = getService(slug)
+  const service = await getServiceBySlug(slug)
   if (!service) notFound()
 
   return (
@@ -48,7 +52,13 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
           <div className="flex flex-wrap gap-6 text-sm">
             <span className="inline-flex items-center gap-2">
               <Star className="size-4 fill-primary text-primary" aria-hidden="true" />
-              <span className="font-semibold">{service.rating}</span> rating
+              {service.rating !== null ? (
+                <>
+                  <span className="font-semibold">{service.rating}</span> rating ({service.reviewCount})
+                </>
+              ) : (
+                <span className="font-semibold">New</span>
+              )}
             </span>
             <span className="inline-flex items-center gap-2">
               <Clock className="size-4" aria-hidden="true" /> {service.duration}
@@ -75,7 +85,7 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
           <p className="mt-1 text-sm text-muted-foreground">Starting prices. Parts approved by you before work begins.</p>
           <ul className="mt-6 flex flex-col divide-y divide-border">
             {service.tasks.map((task) => (
-              <li key={task.name} className="flex items-center justify-between gap-4 py-3 text-sm">
+              <li key={task.id} className="flex items-center justify-between gap-4 py-3 text-sm">
                 <span>{task.name}</span>
                 <span className="font-semibold">{formatCurrency(task.price)}</span>
               </li>
@@ -87,9 +97,11 @@ export default async function ServiceDetailPage({ params }: { params: Promise<{ 
           >
             Book {service.name.toLowerCase()}
           </Link>
-          <p className="mt-3 text-center text-xs text-muted-foreground">
-            {service.jobsDone.toLocaleString('en-US')} jobs completed on Fixora
-          </p>
+          {service.jobsDone > 0 && (
+            <p className="mt-3 text-center text-xs text-muted-foreground">
+              {service.jobsDone.toLocaleString('en-US')} jobs completed on Fixora
+            </p>
+          )}
         </aside>
       </div>
     </section>

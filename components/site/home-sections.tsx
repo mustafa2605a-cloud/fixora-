@@ -4,7 +4,8 @@ import { BadgeCheck, CalendarCheck, Clock, ShieldCheck, Star, Wrench } from 'luc
 import { buttonVariants } from '@/components/ui/button'
 import { ServiceCard } from '@/components/site/service-card'
 import { ServiceIcon } from '@/components/service-icon'
-import { faqs, services, testimonials } from '@/lib/data'
+import { faqs, testimonials } from '@/lib/data'
+import { getCatalog } from '@/lib/catalog'
 import { cn } from '@/lib/utils'
 
 export function Hero() {
@@ -74,7 +75,8 @@ export function Hero() {
   )
 }
 
-export function CategoryStrip() {
+export async function CategoryStrip() {
+  const services = await getCatalog()
   return (
     <section aria-label="Service categories" className="border-y border-border bg-card">
       <ul className="mx-auto grid max-w-6xl grid-cols-3 gap-2 px-4 py-6 md:grid-cols-6 md:px-6">
@@ -106,7 +108,8 @@ export function SectionHeading({ eyebrow, title, description }: { eyebrow: strin
   )
 }
 
-export function PopularServices() {
+export async function PopularServices() {
+  const services = await getCatalog()
   return (
     <section className="mx-auto max-w-6xl px-4 py-20 md:px-6">
       <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
@@ -132,7 +135,7 @@ export const steps = [
   { icon: Wrench, title: 'Choose a service', text: 'Pick from six categories and the exact task you need done.' },
   { icon: Clock, title: 'Pick a time', text: 'Select a date and a two-hour arrival window that suits you.' },
   { icon: BadgeCheck, title: 'Get it fixed', text: 'A verified pro arrives on time and completes the job.' },
-  { icon: ShieldCheck, title: 'Relax', text: 'Pay after the job. Every visit is covered for 30 days.' },
+  { icon: ShieldCheck, title: 'Relax', text: 'Pay securely online. Every visit is covered for 30 days.' },
 ]
 
 export function HowItWorks() {

@@ -8,6 +8,8 @@ import {
   Testimonials,
 } from '@/components/site/home-sections'
 
+export const revalidate = 60
+
 export default function HomePage() {
   return (
     <>

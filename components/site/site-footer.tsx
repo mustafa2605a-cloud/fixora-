@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { FixoraLogo } from '@/components/fixora-logo'
-import { services } from '@/lib/data'
+import { getCatalog } from '@/lib/catalog'
 
-export function SiteFooter() {
+export async function SiteFooter() {
+  const services = await getCatalog().catch(() => [])
   return (
     <footer className="bg-secondary text-secondary-foreground">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 md:grid-cols-4 md:px-6">
@@ -22,7 +23,6 @@ export function SiteFooter() {
             { href: '/about', label: 'About us' },
             { href: '/how-it-works', label: 'How it works' },
             { href: '/contact', label: 'Contact' },
-            { href: '/admin', label: 'Admin dashboard' },
           ]}
         />
         <div className="flex flex-col gap-3">

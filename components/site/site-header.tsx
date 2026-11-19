@@ -7,6 +7,7 @@ import { Menu, X } from 'lucide-react'
 import { FixoraLogo } from '@/components/fixora-logo'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useIsAdmin } from '@/lib/use-is-admin'
 
 const nav = [
   { href: '/services', label: 'Services' },
@@ -18,6 +19,7 @@ const nav = [
 export function SiteHeader() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  const isAdmin = useIsAdmin()
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur">
@@ -42,9 +44,11 @@ export function SiteHeader() {
           })}
         </nav>
         <div className="hidden items-center gap-2 md:flex">
-          <Link href="/admin" className={buttonVariants({ variant: 'ghost', size: 'lg' })}>
-            Admin
-          </Link>
+          {isAdmin && (
+            <Link href="/admin" className={buttonVariants({ variant: 'ghost', size: 'lg' })}>
+              Admin
+            </Link>
+          )}
           <Link href="/book" className={cn(buttonVariants({ size: 'lg' }), 'px-4 font-semibold')}>
             Book a service
           </Link>
@@ -63,7 +67,7 @@ export function SiteHeader() {
       {open && (
         <nav id="mobile-nav" aria-label="Mobile" className="border-t border-border px-4 py-3 md:hidden">
           <ul className="flex flex-col gap-1">
-            {[...nav, { href: '/admin', label: 'Admin dashboard' }].map((item) => (
+            {[...nav, ...(isAdmin ? [{ href: '/admin', label: 'Admin dashboard' }] : [])].map((item) => (
               <li key={item.href}>
                 <Link
                   href={item.href}

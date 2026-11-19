@@ -1,29 +1,71 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
-import { StatusBadge, TableCard, td, th } from '@/components/admin/admin-ui'
-import { bookings as initialBookings, formatCurrency, type Booking, type BookingStatus } from '@/lib/data'
+import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
+import { useState, useTransition } from 'react'
+import { ChevronRight, Loader2, Search } from 'lucide-react'
+import { Pagination, StatusBadge, TableCard, td, th } from '@/components/admin/admin-ui'
+import { bookingStatusLabel, formatCurrency, formatTime, type BookingStatus } from '@/lib/data'
 import { cn } from '@/lib/utils'
 
-const statuses: (BookingStatus | 'All')[] = ['All', 'Pending', 'Confirmed', 'In Progress', 'Completed', 'Cancelled']
+export type BookingRow = {
+  id: string
+  booking_reference: string
+  guest_name: string
+  guest_email: string
+  guest_phone: string
+  area: string
+  city: string
+  service_name_snapshot: string
+  task_name_snapshot: string | null
+  appointment_date: string
+  appointment_start_time: string
+  booking_status: BookingStatus
+  payment_status: string
+  total_amount: number
+  currency: string
+  technician: { full_name: string } | null
+}
 
-export function BookingsTable() {
-  const [rows, setRows] = useState<Booking[]>(initialBookings)
-  const [filter, setFilter] = useState<(typeof statuses)[number]>('All')
-  const [query, setQuery] = useState('')
+type Filters = { q: string; status: string; sort: string; from: string; to: string }
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return rows.filter(
-      (b) =>
-        (filter === 'All' || b.status === filter) &&
-        (!q || [b.id, b.customer, b.service, b.technician].some((v) => v.toLowerCase().includes(q))),
-    )
-  }, [rows, filter, query])
+const statuses = ['all', ...Object.keys(bookingStatusLabel)] as const
 
-  function updateStatus(id: string, status: BookingStatus) {
-    setRows((prev) => prev.map((b) => (b.id === id ? { ...b, status } : b)))
+export function BookingsTable({
+  rows,
+  total,
+  page,
+  pageSize,
+  filters,
+  error,
+}: {
+  rows: BookingRow[]
+  total: number
+  page: number
+  pageSize: number
+  filters: Filters
+  error?: string
+}) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const [query, setQuery] = useState(filters.q)
+  const [pending, start] = useTransition()
+
+  function href(next: Partial<Filters> & { page?: number }) {
+    const merged = { ...filters, ...next }
+    const params = new URLSearchParams()
+    if (merged.q) params.set('q', merged.q)
+    if (merged.status && merged.status !== 'all') params.set('status', merged.status)
+    if (merged.sort && merged.sort !== 'newest') params.set('sort', merged.sort)
+    if (merged.from) params.set('from', merged.from)
+    if (merged.to) params.set('to', merged.to)
+    if (next.page && next.page > 1) params.set('page', String(next.page))
+    const s = params.toString()
+    return s ? `${pathname}?${s}` : pathname
+  }
+
+  function go(next: Partial<Filters>) {
+    start(() => router.push(href(next)))
   }
 
   return (
@@ -34,29 +76,63 @@ export function BookingsTable() {
             <button
               key={s}
               type="button"
-              aria-pressed={filter === s}
-              onClick={() => setFilter(s)}
+              aria-pressed={filters.status === s}
+              onClick={() => go({ status: s })}
               className={cn(
                 'rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium',
-                filter === s && 'border-secondary bg-secondary text-secondary-foreground',
+                filters.status === s && 'border-secondary bg-secondary text-secondary-foreground',
               )}
             >
-              {s}
+              {s === 'all' ? 'All' : bookingStatusLabel[s as BookingStatus]}
             </button>
           ))}
         </div>
-        <label className="relative w-full lg:w-72">
-          <span className="sr-only">Search bookings</span>
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search ID, customer, technician"
-            className="h-10 w-full rounded-lg border border-input bg-card pl-9 pr-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          />
-        </label>
+        <form
+          className="relative w-full lg:w-72"
+          onSubmit={(e) => {
+            e.preventDefault()
+            go({ q: query.trim() })
+          }}
+        >
+          <label>
+            <span className="sr-only">Search bookings</span>
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search ref, customer, email, phone"
+              className="h-10 w-full rounded-lg border border-input bg-card pl-9 pr-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            />
+          </label>
+        </form>
       </div>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <label className="flex items-center gap-2">
+          Sort
+          <select
+            value={filters.sort}
+            onChange={(e) => go({ sort: e.target.value })}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="appointment">Appointment (soonest)</option>
+            <option value="appointment_desc">Appointment (latest)</option>
+            <option value="amount">Amount (high → low)</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          From
+          <input type="date" value={filters.from} onChange={(e) => go({ from: e.target.value })} className="h-8 rounded-md border border-input bg-background px-2 text-xs" />
+        </label>
+        <label className="flex items-center gap-2">
+          To
+          <input type="date" value={filters.to} onChange={(e) => go({ to: e.target.value })} className="h-8 rounded-md border border-input bg-background px-2 text-xs" />
+        </label>
+        {pending && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Loading" />}
+      </div>
+      {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
       <TableCard>
         <table className="w-full">
           <thead className="border-b border-border">
@@ -69,45 +145,53 @@ export function BookingsTable() {
               <th className={`${th} text-right`}>Amount</th>
               <th className={th}>Status</th>
               <th className={th}>
-                <span className="sr-only">Update status</span>
+                <span className="sr-only">Open</span>
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {visible.map((b) => (
-              <tr key={b.id}>
-                <td className={`${td} font-mono text-xs`}>{b.id}</td>
-                <td className={td}>
-                  <p className="font-medium">{b.customer}</p>
-                  <p className="text-xs text-muted-foreground">{b.address}</p>
+            {rows.map((b) => (
+              <tr key={b.id} className="hover:bg-muted/40">
+                <td className={`${td} font-mono text-xs`}>
+                  <Link href={`/admin/bookings/${b.id}`} className="hover:underline">
+                    {b.booking_reference}
+                  </Link>
                 </td>
                 <td className={td}>
-                  <p>{b.service}</p>
-                  <p className="text-xs text-muted-foreground">{b.task}</p>
-                </td>
-                <td className={td}>{b.technician}</td>
-                <td className={td}>
-                  {b.date} · {b.time}
-                </td>
-                <td className={`${td} text-right font-medium`}>{formatCurrency(b.amount)}</td>
-                <td className={td}>
-                  <StatusBadge status={b.status} />
+                  <p className="font-medium">{b.guest_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {b.area}, {b.city}
+                  </p>
                 </td>
                 <td className={td}>
-                  <select
-                    aria-label={`Update status for ${b.id}`}
-                    value={b.status}
-                    onChange={(e) => updateStatus(b.id, e.target.value as BookingStatus)}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  <p>{b.service_name_snapshot}</p>
+                  <p className="text-xs text-muted-foreground">{b.task_name_snapshot}</p>
+                </td>
+                <td className={td}>{b.technician?.full_name ?? <span className="text-muted-foreground">Unassigned</span>}</td>
+                <td className={td}>
+                  {b.appointment_date} · {formatTime(b.appointment_start_time)}
+                </td>
+                <td className={`${td} text-right font-medium`}>
+                  {formatCurrency(Number(b.total_amount), b.currency)}
+                  <p className="text-xs font-normal">
+                    <StatusBadge status={b.payment_status} />
+                  </p>
+                </td>
+                <td className={td}>
+                  <StatusBadge status={b.booking_status} />
+                </td>
+                <td className={td}>
+                  <Link
+                    href={`/admin/bookings/${b.id}`}
+                    aria-label={`Manage ${b.booking_reference}`}
+                    className="inline-flex h-8 items-center gap-1 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-muted"
                   >
-                    {statuses.slice(1).map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </select>
+                    Manage <ChevronRight className="size-3.5" aria-hidden="true" />
+                  </Link>
                 </td>
               </tr>
             ))}
-            {visible.length === 0 && (
+            {rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-10 text-center text-sm text-muted-foreground">
                   No bookings match your filters.
@@ -117,9 +201,7 @@ export function BookingsTable() {
           </tbody>
         </table>
       </TableCard>
-      <p className="text-xs text-muted-foreground">
-        Showing {visible.length} of {rows.length} bookings. Status changes are demo-only and reset on reload.
-      </p>
+      <Pagination page={page} pageSize={pageSize} total={total} hrefFor={(p) => href({ page: p })} />
     </div>
   )
 }

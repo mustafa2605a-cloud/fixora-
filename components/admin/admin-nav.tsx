@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarCheck, HardHat, LayoutDashboard, ListChecks, Users } from 'lucide-react'
+import { CalendarCheck, CreditCard, HardHat, LayoutDashboard, ListChecks, Settings, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const items = [
@@ -11,6 +11,8 @@ const items = [
   { href: '/admin/technicians', label: 'Technicians', icon: HardHat },
   { href: '/admin/customers', label: 'Customers', icon: Users },
   { href: '/admin/services', label: 'Services', icon: ListChecks },
+  { href: '/admin/payments', label: 'Payments', icon: CreditCard },
+  { href: '/admin/settings', label: 'Settings', icon: Settings },
 ]
 
 export function AdminNav() {
