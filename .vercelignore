@@ -1,0 +1,7 @@
+.insforge
+.env
+.env.*
+!.env.example
+scripts/tests
+node_modules
+.next

@@ -6,7 +6,7 @@
 // All prices, availability and statuses are decided by Postgres functions;
 // this function never trusts amounts from the browser. Uses the project API
 // key (server-side secret) only to call trusted RPCs and the Stripe catalog.
-import { createAdminClient } from 'npm:@insforge/sdk'
+import { createAdminClient, createClient } from 'npm:@insforge/sdk'
 
 const BASE_URL = Deno.env.get('INSFORGE_BASE_URL') ?? ''
 const API_KEY = Deno.env.get('API_KEY') ?? ''
@@ -19,6 +19,10 @@ const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? 'http://localhost:30
 const APP_URL = (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '')
 
 const admin = createAdminClient({ baseUrl: BASE_URL, apiKey: API_KEY })
+// Guest checkout is an anonymous one-time purchase: InsForge creates Checkout
+// sessions with the caller's token, so use the public anon client (no subject).
+// The booking is correlated through metadata.booking_id, verified by the webhook.
+const anon = createClient({ baseUrl: BASE_URL, anonKey: Deno.env.get('ANON_KEY') ?? '' })
 
 function originAllowed(origin: string | null): string | null {
   if (!origin) return null
@@ -108,6 +112,13 @@ async function stripeApi(path: string, body: unknown) {
   return data
 }
 
+// Stripe idempotency keys travel in an HTTP header, so they must be plain ASCII.
+// Product keys contain service names (spaces, em dashes, non-Latin text) — hash them.
+async function safeKey(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 40)
+}
+
 async function ensureProduct(productKey: string, name: string): Promise<string> {
   const { data } = await admin.database
     .from('stripe_catalog_cache')
@@ -119,7 +130,7 @@ async function ensureProduct(productKey: string, name: string): Promise<string> 
   const created = await stripeApi('/catalog/products', {
     name: name.slice(0, 250),
     metadata: { fixora_key: productKey },
-    idempotencyKey: `fixora-product-${STRIPE_ENV}-${productKey}`,
+    idempotencyKey: `fixora-product-${STRIPE_ENV}-${await safeKey(productKey)}`,
   })
   const productId = created?.product?.productId ?? created?.product?.id
   if (!productId) throw new Error('stripe_product_missing')
@@ -147,7 +158,7 @@ async function ensurePrice(productKey: string, name: string, amount: number, cur
     productId,
     currency: cur,
     unitAmount: unit,
-    idempotencyKey: `fixora-price-${STRIPE_ENV}-${productKey}-${unit}-${cur}`,
+    idempotencyKey: `fixora-price-${STRIPE_ENV}-${await safeKey(productKey)}-${unit}-${cur}`,
   })
   const priceId = created?.price?.priceId ?? created?.price?.id
   if (!priceId) throw new Error('stripe_price_missing')
@@ -191,13 +202,12 @@ async function openCheckout(reference: string, token: string, siteUrl: string) {
 
   const ref = encodeURIComponent(p.booking_reference)
   const window = Math.floor(Date.now() / (20 * 60 * 1000))
-  const { data, error: checkoutError } = await admin.payments.stripe.createCheckoutSession(STRIPE_ENV, {
+  const { data, error: checkoutError } = await anon.payments.stripe.createCheckoutSession(STRIPE_ENV, {
     mode: 'payment',
     lineItems,
     successUrl: `${siteUrl}/booking/${ref}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${siteUrl}/booking/${ref}?checkout=cancelled`,
     customerEmail: p.email,
-    subject: { type: 'booking', id: p.booking_id },
     metadata: { booking_id: p.booking_id, booking_reference: p.booking_reference },
     idempotencyKey: `fixora-checkout-${p.booking_id}-${window}`,
   })
