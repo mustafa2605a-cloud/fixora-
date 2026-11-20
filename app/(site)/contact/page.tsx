@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { Clock, Mail, Phone } from 'lucide-react'
 import { ContactForm } from '@/components/site/contact-form'
 import { getBookingSettings } from '@/lib/catalog'
-import { formatTime } from '@/lib/data'
+import { describeOpeningHours } from '@/lib/data'
 
 export const metadata: Metadata = {
   title: 'Contact',
@@ -10,16 +10,6 @@ export const metadata: Metadata = {
 }
 
 export const revalidate = 300
-
-// ISO weekdays (Mon = 1 … Sun = 7), as stored in business_settings.working_days.
-const dayNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-function describeDays(days: number[]) {
-  const sorted = [...days].sort((a, b) => a - b)
-  if (sorted.length === 7) return '7 days'
-  const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1)
-  return contiguous && sorted.length > 2 ? `${dayNames[sorted[0]]}–${dayNames[sorted.at(-1)!]}` : sorted.map((d) => dayNames[d]).join(', ')
-}
 
 export default async function ContactPage() {
   const settings = await getBookingSettings().catch(() => null)
@@ -29,7 +19,7 @@ export default async function ContactPage() {
     settings && {
       icon: Clock,
       label: 'Hours',
-      value: `${describeDays(settings.working_days)}, ${formatTime(settings.business_hours_start)} – ${formatTime(settings.business_hours_end)}`,
+      value: describeOpeningHours(settings.working_days, settings.business_hours_start, settings.business_hours_end),
     },
   ].filter(Boolean) as { icon: typeof Mail; label: string; value: string; href?: string }[]
   return (

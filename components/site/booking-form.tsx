@@ -87,6 +87,10 @@ export function BookingForm({
   }, [])
 
   // Live availability for the chosen day (server decides capacity/lead time).
+  // Until the customer picks a date themselves, skip past days with no bookable
+  // time left (e.g. late evening "Today") so the form never opens on a dead day.
+  const autoAdvance = useRef(true)
+
   useEffect(() => {
     if (!date) return
     let cancelled = false
@@ -101,6 +105,13 @@ export function BookingForm({
           return
         }
         const list = (data ?? []) as Slot[]
+        if (autoAdvance.current && !list.some((s) => s.available)) {
+          const idx = days.findIndex((d) => d.value === date)
+          if (idx >= 0 && idx < days.length - 1) {
+            setDate(days[idx + 1].value)
+            return
+          }
+        }
         setSlots(list)
         setTime((current) => {
           const still = list.find((s) => s.start_time.startsWith(current ?? '--') && s.available)
@@ -110,7 +121,7 @@ export function BookingForm({
     return () => {
       cancelled = true
     }
-  }, [date])
+  }, [date, days])
 
   if (!service) {
     return <p className="text-muted-foreground">Online booking is temporarily unavailable. Please contact us.</p>
@@ -220,9 +231,9 @@ export function BookingForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-8 lg:grid-cols-[1.6fr_1fr]" noValidate>
-      <div className="flex flex-col gap-8">
-        <fieldset className="flex flex-col gap-4" disabled={busy}>
+    <form onSubmit={handleSubmit} className="grid gap-8 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]" noValidate>
+      <div className="flex min-w-0 flex-col gap-8">
+        <fieldset className="min-w-0 flex flex-col gap-4" disabled={busy}>
           <legend className="mb-4 font-heading text-lg font-semibold">1. Choose a service</legend>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {services.map((s) => (
@@ -270,7 +281,7 @@ export function BookingForm({
           </label>
         </fieldset>
 
-        <fieldset disabled={busy}>
+        <fieldset className="min-w-0" disabled={busy}>
           <legend className="mb-4 font-heading text-lg font-semibold">2. Pick a date &amp; time</legend>
           <div className="flex gap-2 overflow-x-auto pb-2" role="radiogroup" aria-label="Date">
             {days.map((d) => (
@@ -279,7 +290,10 @@ export function BookingForm({
                 key={d.value}
                 role="radio"
                 aria-checked={d.value === date}
-                onClick={() => setDate(d.value)}
+                onClick={() => {
+                  autoAdvance.current = false
+                  setDate(d.value)
+                }}
                 className={cn(
                   'flex min-w-20 flex-col items-center rounded-xl border border-border bg-card px-3 py-3 text-sm',
                   d.value === date && 'border-secondary bg-secondary text-secondary-foreground',
@@ -322,7 +336,7 @@ export function BookingForm({
           )}
         </fieldset>
 
-        <fieldset className="grid gap-4 sm:grid-cols-2" disabled={busy}>
+        <fieldset className="min-w-0 grid gap-4 sm:grid-cols-2" disabled={busy}>
           <legend className="mb-4 font-heading text-lg font-semibold">3. Your details</legend>
           <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
             Full name
@@ -407,7 +421,7 @@ export function BookingForm({
         </fieldset>
       </div>
 
-      <aside className="h-fit rounded-3xl border border-border bg-card p-6 lg:sticky lg:top-24">
+      <aside className="h-fit min-w-0 rounded-3xl border border-border bg-card p-6 lg:sticky lg:top-24">
         <h2 className="font-heading text-lg font-semibold">Summary</h2>
         <dl className="mt-4 flex flex-col gap-3 text-sm">
           <Row label="Service" value={service.name} />

@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import { FixoraLogo } from '@/components/fixora-logo'
-import { getCatalog } from '@/lib/catalog'
+import { getBookingSettings, getCatalog } from '@/lib/catalog'
+import { describeOpeningHours } from '@/lib/data'
 
 export async function SiteFooter() {
-  const services = await getCatalog().catch(() => [])
+  const [services, settings] = await Promise.all([getCatalog().catch(() => []), getBookingSettings().catch(() => null)])
   return (
     <footer className="bg-secondary text-secondary-foreground">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 md:grid-cols-4 md:px-6">
@@ -27,9 +28,24 @@ export async function SiteFooter() {
         />
         <div className="flex flex-col gap-3">
           <h2 className="font-heading text-sm font-semibold">Get in touch</h2>
-          <p className="text-sm text-secondary-foreground/70">support@fixora.app</p>
-          <p className="text-sm text-secondary-foreground/70">+1 (555) 010-0100</p>
-          <p className="text-sm text-secondary-foreground/70">Open 7 days, 7am – 10pm</p>
+          {settings?.contact_email && (
+            <a href={`mailto:${settings.contact_email}`} className="text-sm text-secondary-foreground/70 hover:text-primary">
+              {settings.contact_email}
+            </a>
+          )}
+          {settings?.contact_phone && (
+            <a href={`tel:${settings.contact_phone.replace(/[^+\d]/g, '')}`} className="text-sm text-secondary-foreground/70 hover:text-primary">
+              {settings.contact_phone}
+            </a>
+          )}
+          {settings && (
+            <p className="text-sm text-secondary-foreground/70">
+              Open {describeOpeningHours(settings.working_days, settings.business_hours_start, settings.business_hours_end)}
+            </p>
+          )}
+          <Link href="/contact" className="text-sm text-secondary-foreground/70 hover:text-primary">
+            Send us a message
+          </Link>
         </div>
       </div>
       <div className="border-t border-secondary-foreground/10">

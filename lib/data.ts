@@ -91,3 +91,18 @@ export function formatTime(t: string) {
   const [h, m] = t.split(':').map(Number)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
+
+// ISO weekdays (Mon = 1 … Sun = 7), as stored in business_settings.working_days.
+const isoDayNames = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+export function describeOpeningHours(days: number[], start: string, end: string) {
+  const sorted = [...days].sort((a, b) => a - b)
+  const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1)
+  const dayText =
+    sorted.length === 7
+      ? '7 days'
+      : contiguous && sorted.length > 2
+        ? `${isoDayNames[sorted[0]]}–${isoDayNames[sorted.at(-1)!]}`
+        : sorted.map((d) => isoDayNames[d]).join(', ')
+  return `${dayText}, ${formatTime(start)} – ${formatTime(end)}`
+}
