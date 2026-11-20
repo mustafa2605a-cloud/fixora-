@@ -3,6 +3,11 @@
 // POST { action: 'create', booking: {...}, idempotencyKey }  -> create guest booking + Stripe Checkout
 // POST { action: 'pay', reference, token }                    -> (re)open Checkout for an unpaid booking
 //
+// Optional customer accounts: when the browser sends the signed-in user's
+// access token (Authorization: Bearer ...), it is verified with InsForge Auth.
+// The booking is then created as that user (owned by the account), and 'pay'
+// works without the private link token for the booking's verified owner.
+//
 // All prices, availability and statuses are decided by Postgres functions;
 // this function never trusts amounts from the browser. Uses the project API
 // key (server-side secret) only to call trusted RPCs and the Stripe catalog.
@@ -182,8 +187,27 @@ type Prepared = {
   open_session: { checkout_session_id: string; url: string } | null
 }
 
-async function openCheckout(reference: string, token: string, siteUrl: string) {
-  const { data: prep, error } = await admin.database.rpc('prepare_checkout', { p_reference: reference, p_token: token })
+// Returns the verified signed-in user (or null for guests / invalid tokens).
+async function signedInUser(req: Request) {
+  const header = req.headers.get('Authorization') ?? ''
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  if (!token || token === (Deno.env.get('ANON_KEY') ?? '') || token.split('.').length !== 3) return null
+  const client = createClient({ baseUrl: BASE_URL, anonKey: Deno.env.get('ANON_KEY') ?? '', edgeFunctionToken: token, isServerMode: true })
+  try {
+    const { data, error } = await client.auth.getCurrentUser()
+    if (error || !data?.user?.id) return null
+    return { id: data.user.id as string, client }
+  } catch {
+    return null
+  }
+}
+
+async function openCheckout(reference: string, token: string | null, siteUrl: string, ownerId: string | null = null) {
+  const { data: prep, error } = await admin.database.rpc('prepare_checkout', {
+    p_reference: reference,
+    p_token: token,
+    p_owner: ownerId,
+  })
   if (error) throw error
   const p = prep as Prepared
   if (p.open_session?.url) return { url: p.open_session.url, sessionId: p.open_session.checkout_session_id }
@@ -216,7 +240,7 @@ async function openCheckout(reference: string, token: string, siteUrl: string) {
   }
   const session = data.checkoutSession
   const sessionId = session.checkoutSessionId ?? session.id
-  const cipher = await encryptToken(token)
+  const cipher = token ? await encryptToken(token) : null
   const { error: attachError } = await admin.database.rpc('attach_checkout_session', {
     p_booking_id: p.booking_id,
     p_provider: 'stripe',
@@ -252,11 +276,15 @@ export default async function (req: Request): Promise<Response> {
     return json({ error: 'invalid_json', message: 'Invalid request.' }, 400, origin)
   }
 
+  const user = await signedInUser(req)
+
   try {
     if (body.action === 'create') {
       const b = (body.booking ?? {}) as Record<string, unknown>
       const idempotencyKey = str(body.idempotencyKey, 100)
-      const { data, error } = await admin.database.rpc('create_booking', {
+      // Signed in: run as the user so Postgres records auth.uid() as the owner.
+      const db = user ? user.client.database : admin.database
+      const { data, error } = await db.rpc('create_booking', {
         p_service_id: str(b.serviceId, 64),
         p_task_id: str(b.taskId, 64),
         p_full_name: str(b.fullName, 120),
@@ -303,9 +331,9 @@ export default async function (req: Request): Promise<Response> {
     if (body.action === 'pay') {
       const reference = str(body.reference, 20)
       const token = str(body.token, 128)
-      if (!reference || !token) return json({ error: 'invalid_lookup', message: MESSAGES.invalid_lookup }, 400, origin)
+      if (!reference || (!token && !user)) return json({ error: 'invalid_lookup', message: MESSAGES.invalid_lookup }, 400, origin)
       try {
-        const checkout = await openCheckout(reference, token, siteUrl)
+        const checkout = await openCheckout(reference, token, siteUrl, user?.id ?? null)
         return json({ checkoutUrl: checkout.url }, 200, origin)
       } catch (err) {
         const e = dbError(err)

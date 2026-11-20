@@ -3,11 +3,11 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
-import { Menu, X } from 'lucide-react'
+import { Menu, UserRound, X } from 'lucide-react'
 import { FixoraLogo } from '@/components/fixora-logo'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useIsAdmin } from '@/lib/use-is-admin'
+import { useAccount } from '@/lib/use-account'
 
 const nav = [
   { href: '/services', label: 'Services' },
@@ -19,7 +19,9 @@ const nav = [
 export function SiteHeader() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  const isAdmin = useIsAdmin()
+  const { account, ready } = useAccount()
+  const isAdmin = account?.isAdmin === true
+  const accountLink = account ? { href: '/account', label: 'My account' } : { href: '/account/login', label: 'Sign in' }
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur">
@@ -49,6 +51,16 @@ export function SiteHeader() {
               Admin
             </Link>
           )}
+          {ready && (
+            <Link
+              href={accountLink.href}
+              aria-current={pathname.startsWith('/account') ? 'page' : undefined}
+              className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), 'gap-2')}
+            >
+              <UserRound className="size-4" aria-hidden="true" />
+              {accountLink.label}
+            </Link>
+          )}
           <Link href="/book" className={cn(buttonVariants({ size: 'lg' }), 'px-4 font-semibold')}>
             Book a service
           </Link>
@@ -67,7 +79,7 @@ export function SiteHeader() {
       {open && (
         <nav id="mobile-nav" aria-label="Mobile" className="border-t border-border px-4 py-3 md:hidden">
           <ul className="flex flex-col gap-1">
-            {[...nav, ...(isAdmin ? [{ href: '/admin', label: 'Admin dashboard' }] : [])].map((item) => (
+            {[...nav, ...(ready ? [accountLink] : []), ...(isAdmin ? [{ href: '/admin', label: 'Admin dashboard' }] : [])].map((item) => (
               <li key={item.href}>
                 <Link
                   href={item.href}

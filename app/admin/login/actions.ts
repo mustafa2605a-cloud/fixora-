@@ -50,13 +50,9 @@ export async function googleSignInAction() {
     skipBrowserRedirect: true,
   })
   if (error || !data?.url || !data.codeVerifier) redirect('/admin/login?error=oauth_failed')
-  cookieStore.set('insforge_code_verifier', data.codeVerifier, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 600,
-  })
+  const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, path: '/', maxAge: 600 }
+  cookieStore.set('insforge_code_verifier', data.codeVerifier, opts)
+  cookieStore.set('fixora_auth_next', '/admin', opts)
   redirect(data.url)
 }
 

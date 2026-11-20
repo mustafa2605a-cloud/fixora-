@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@insforge/sdk/ssr/middleware'
 
-// Keeps the InsForge session fresh for admin pages (Server Components read
-// the refreshed cookie). Public pages are not touched.
+// Keeps the InsForge session fresh (admin pages and signed-in customers).
+// Only talks to InsForge when the access token is missing/expiring and a
+// refresh cookie exists, so guest visitors pay no extra cost.
 export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request })
   await updateSession({
@@ -15,5 +16,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*'],
+  matcher: ['/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|webp|ico|gif|txt|xml)$).*)'],
 }

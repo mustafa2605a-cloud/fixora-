@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AlertTriangle, CheckCircle2, Clock, Copy, Loader2, Star, XCircle } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { bookingStatusLabel, formatCurrency, formatTime, paymentStatusLabel, type BookingStatus as Status } from '@/lib/data'
+import { bookingStatusLabel, bookingStatusTone as statusTone, formatCurrency, formatTime, paymentStatusLabel, type BookingStatus as Status } from '@/lib/data'
 import { functionUrl } from '@/lib/insforge/config'
 import { publicClient } from '@/lib/insforge/public'
+import { browserClient, freshAccessToken, hasSessionCookie } from '@/lib/insforge/browser'
 import { recallBookingToken, rememberBookingToken } from '@/lib/booking-token'
 import { cn } from '@/lib/utils'
 
@@ -43,16 +44,6 @@ type Booking = {
   history: { status: Status; action: string; at: string }[]
 }
 
-const statusTone: Record<Status, string> = {
-  pending_payment: 'bg-muted text-muted-foreground',
-  confirmed: 'bg-accent text-accent-foreground',
-  technician_assigned: 'bg-accent text-accent-foreground',
-  in_progress: 'bg-chart-4/15 text-chart-4',
-  completed: 'bg-chart-3/15 text-chart-3',
-  cancelled: 'bg-destructive/10 text-destructive',
-  rejected: 'bg-destructive/10 text-destructive',
-  payment_failed: 'bg-destructive/10 text-destructive',
-}
 
 const actionLabel: Record<string, string> = {
   booking_created: 'Booking received',
@@ -73,6 +64,8 @@ export function BookingStatusView({ reference }: { reference: string }) {
   const params = useSearchParams()
   const checkout = params.get('checkout')
   const [token, setToken] = useState<string | null>(null)
+  // Signed-in owners can open their bookings without the private link token.
+  const [ownerMode, setOwnerMode] = useState(false)
   const [booking, setBooking] = useState<Booking | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'error'>('loading')
   const [message, setMessage] = useState<string | null>(null)
@@ -87,15 +80,20 @@ export function BookingStatusView({ reference }: { reference: string }) {
     const t = fromHash && fromHash.length >= 32 ? fromHash : recallBookingToken(reference)
     if (fromHash && fromHash.length >= 32) rememberBookingToken(reference, fromHash)
     if (!t) {
-      setState('missing')
+      if (hasSessionCookie()) setOwnerMode(true)
+      else setState('missing')
       return
     }
     setToken(t)
   }, [reference])
 
+  // Token holders use the anonymous client; owners use their own session.
+  const db = useCallback(() => (token ? publicClient() : browserClient()).database, [token])
+  const canAccess = Boolean(token) || ownerMode
+
   const load = useCallback(async () => {
-    if (!token) return null
-    const { data, error } = await publicClient().database.rpc('lookup_booking', { p_reference: reference, p_token: token })
+    if (!token && !ownerMode) return null
+    const { data, error } = await db().rpc('lookup_booking', { p_reference: reference, p_token: token })
     if (error || !data) {
       setState(String(error?.message ?? '').includes('not_found') ? 'missing' : 'error')
       return null
@@ -103,7 +101,7 @@ export function BookingStatusView({ reference }: { reference: string }) {
     setBooking(data as Booking)
     setState('ready')
     return data as Booking
-  }, [reference, token])
+  }, [reference, token, ownerMode, db])
 
   useEffect(() => {
     load()
@@ -123,13 +121,23 @@ export function BookingStatusView({ reference }: { reference: string }) {
   }, [checkout, booking, polls, load])
 
   async function pay() {
-    if (!token) return
+    if (!canAccess) return
     setBusy('pay')
     setMessage(null)
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (!token) {
+        const access = await freshAccessToken()
+        if (!access) {
+          setMessage('Your session has expired. Please sign in again.')
+          setBusy(null)
+          return
+        }
+        headers.Authorization = `Bearer ${access}`
+      }
       const res = await fetch(functionUrl('booking-api'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ action: 'pay', reference, token }),
       })
       const body = await res.json().catch(() => ({}))
@@ -146,10 +154,10 @@ export function BookingStatusView({ reference }: { reference: string }) {
   }
 
   async function cancel() {
-    if (!token || !window.confirm('Cancel this booking?')) return
+    if (!canAccess || !window.confirm('Cancel this booking?')) return
     setBusy('cancel')
     setMessage(null)
-    const { error } = await publicClient().database.rpc('cancel_booking', {
+    const { error } = await db().rpc('cancel_booking', {
       p_reference: reference,
       p_token: token,
       p_reason: 'Cancelled by customer',
@@ -161,10 +169,10 @@ export function BookingStatusView({ reference }: { reference: string }) {
 
   async function review(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (!token) return
+    if (!canAccess) return
     setBusy('review')
     const text = String(new FormData(e.currentTarget).get('review') ?? '')
-    const { error } = await publicClient().database.rpc('submit_review', {
+    const { error } = await db().rpc('submit_review', {
       p_reference: reference,
       p_token: token,
       p_rating: rating,
@@ -198,12 +206,21 @@ export function BookingStatusView({ reference }: { reference: string }) {
         <p className="text-muted-foreground">
           {state === 'error'
             ? 'We could not load this booking right now. Please refresh in a moment.'
-            : 'Open the private link from your confirmation email, or use the device you booked on. For help, contact us with your reference.'}
+            : ownerMode
+              ? 'This booking is not linked to the account you are signed in with. Open the private link from your confirmation email, or contact us with your reference.'
+              : 'Open the private link from your confirmation email, use the device you booked on, or sign in with the email you booked with.'}
         </p>
         <p className="rounded-lg bg-muted px-4 py-2 font-mono text-sm">Reference {reference}</p>
-        <Link href="/contact" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
-          Contact support
-        </Link>
+        <div className="flex flex-wrap justify-center gap-2">
+          {!ownerMode && state !== 'error' && (
+            <Link href={`/account/login?next=${encodeURIComponent(`/booking/${reference}`)}`} className={buttonVariants({ size: 'lg' })}>
+              Sign in
+            </Link>
+          )}
+          <Link href="/contact" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
+            Contact support
+          </Link>
+        </div>
       </div>
     )
   }
@@ -352,6 +369,15 @@ export function BookingStatusView({ reference }: { reference: string }) {
             ))}
           </ol>
         </div>
+        {!token ? (
+          <div className="rounded-3xl border border-border bg-card p-6 text-sm">
+            <p className="font-medium">Saved to your account</p>
+            <p className="mt-1 text-muted-foreground">You can find this booking any time under My account.</p>
+            <Link href="/account" className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'mt-3 h-10 px-4')}>
+              Go to My account
+            </Link>
+          </div>
+        ) : (
         <div className="rounded-3xl border border-border bg-card p-6 text-sm">
           <p className="font-medium">Keep your private booking link</p>
           <p className="mt-1 text-muted-foreground">Anyone with this link can view and cancel the booking — do not share it.</p>
@@ -360,6 +386,7 @@ export function BookingStatusView({ reference }: { reference: string }) {
             {copied ? 'Copied' : 'Copy link'}
           </Button>
         </div>
+        )}
       </aside>
     </div>
   )

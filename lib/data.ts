@@ -44,6 +44,18 @@ export const bookingStatusLabel: Record<BookingStatus, string> = {
   payment_failed: 'Payment Failed',
 }
 
+// Badge colours for customer-facing booking status pills.
+export const bookingStatusTone: Record<BookingStatus, string> = {
+  pending_payment: 'bg-muted text-muted-foreground',
+  confirmed: 'bg-accent text-accent-foreground',
+  technician_assigned: 'bg-accent text-accent-foreground',
+  in_progress: 'bg-chart-4/15 text-chart-4',
+  completed: 'bg-chart-3/15 text-chart-3',
+  cancelled: 'bg-destructive/10 text-destructive',
+  rejected: 'bg-destructive/10 text-destructive',
+  payment_failed: 'bg-destructive/10 text-destructive',
+}
+
 export const paymentStatusLabel: Record<string, string> = {
   unpaid: 'Unpaid',
   pending: 'Pending',

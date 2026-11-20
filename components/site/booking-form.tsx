@@ -1,13 +1,15 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ImagePlus, Loader2, X } from 'lucide-react'
+import { ImagePlus, Loader2, UserRound, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ServiceIcon } from '@/components/service-icon'
 import { formatCurrency, formatTime, type ServiceCategory } from '@/lib/data'
 import { functionUrl } from '@/lib/insforge/config'
 import { publicClient } from '@/lib/insforge/public'
+import { browserClient, freshAccessToken, hasSessionCookie } from '@/lib/insforge/browser'
 import { rememberBookingToken } from '@/lib/booking-token'
 import { cn } from '@/lib/utils'
 
@@ -17,6 +19,18 @@ const fieldClass =
 type Area = { city: string; area_name: string }
 type Slot = { start_time: string; remaining: number; available: boolean; reason: string | null }
 type Settings = { currency: string; max_advance_days: number; working_days: number[] } | null
+type SavedAddress = {
+  id: string
+  label: string | null
+  city: string
+  area: string
+  street: string | null
+  building: string | null
+  apartment: string | null
+  directions: string | null
+  is_default: boolean
+}
+type Prefill = { email: string; full_name: string | null; phone: string | null; addresses: SavedAddress[] }
 
 const MAX_PHOTOS = 5
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024
@@ -81,10 +95,50 @@ export function BookingForm({
   const [status, setStatus] = useState<'idle' | 'submitting' | 'uploading' | 'redirecting'>('idle')
   const idempotencyKey = useRef<string>('')
   const fileInput = useRef<HTMLInputElement>(null)
+  // Signed-in customers: fill in saved details (only if they haven't started typing).
+  const [account, setAccount] = useState<Prefill | null>(null)
+  const [accountChecked, setAccountChecked] = useState(false)
+  const [addr, setAddr] = useState<SavedAddress | null>(null)
+  const [fillKey, setFillKey] = useState(0)
+  const typed = useRef(false)
 
   useEffect(() => {
     idempotencyKey.current = newIdempotencyKey()
   }, [])
+
+  useEffect(() => {
+    if (!hasSessionCookie()) {
+      setAccountChecked(true)
+      return
+    }
+    let cancelled = false
+    Promise.resolve(browserClient().database.rpc('my_prefill'))
+      .then(({ data }) => {
+        if (cancelled) return
+        const p = data as Prefill | null
+        setAccountChecked(true)
+        if (!p?.email) return
+        setAccount(p)
+        if (typed.current) return
+        const preferred = p.addresses.find((a) => a.is_default && areas.some((x) => x.city === a.city && x.area_name === a.area))
+        if (preferred) {
+          setAddr(preferred)
+          setCity(preferred.city)
+        }
+        setFillKey((k) => k + 1)
+      })
+      .catch(() => !cancelled && setAccountChecked(true))
+    return () => {
+      cancelled = true
+    }
+  }, [areas])
+
+  function chooseSavedAddress(id: string) {
+    const a = account?.addresses.find((x) => x.id === id) ?? null
+    setAddr(a)
+    if (a && cities.includes(a.city)) setCity(a.city)
+    setFillKey((k) => k + 1)
+  }
 
   // Live availability for the chosen day (server decides capacity/lead time).
   // Until the customer picks a date themselves, skip past days with no bookable
@@ -188,9 +242,13 @@ export function BookingForm({
     setStatus('submitting')
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      // Signed in: the edge function verifies this token and saves the booking to the account.
+      const access = account ? await freshAccessToken() : null
+      if (access) headers.Authorization = `Bearer ${access}`
       const res = await fetch(functionUrl('booking-api'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ action: 'create', idempotencyKey: idempotencyKey.current, booking }),
       })
       const body = await res.json().catch(() => ({}))
@@ -336,20 +394,57 @@ export function BookingForm({
           )}
         </fieldset>
 
-        <fieldset className="min-w-0 grid gap-4 sm:grid-cols-2" disabled={busy}>
+        <fieldset
+          className="min-w-0 grid gap-4 sm:grid-cols-2"
+          disabled={busy}
+          onInput={() => {
+            typed.current = true
+          }}
+        >
           <legend className="mb-4 font-heading text-lg font-semibold">3. Your details</legend>
+          {accountChecked && (
+            <p className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground sm:col-span-2">
+              <UserRound className="size-4 shrink-0" aria-hidden="true" />
+              {account ? (
+                <span>
+                  Signed in as <span className="font-medium text-foreground">{account.email}</span> — this booking will be saved to your account.
+                </span>
+              ) : (
+                <span>
+                  Have an account?{' '}
+                  <Link href="/account/login?next=/book" className="font-medium text-foreground underline-offset-4 hover:underline">
+                    Sign in
+                  </Link>{' '}
+                  to fill this in automatically. Or just continue as a guest.
+                </span>
+              )}
+            </p>
+          )}
           <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
             Full name
-            <input name="name" autoComplete="name" required maxLength={120} className={fieldClass} />
+            <input key={`name-${fillKey}`} name="name" autoComplete="name" required maxLength={120} defaultValue={account?.full_name ?? ''} className={fieldClass} />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium">
             Email
-            <input name="email" type="email" autoComplete="email" required maxLength={254} className={fieldClass} />
+            <input key={`email-${fillKey}`} name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={account?.email ?? ''} className={fieldClass} />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium">
             Phone
-            <input name="phone" type="tel" autoComplete="tel" required maxLength={40} className={fieldClass} />
+            <input key={`phone-${fillKey}`} name="phone" type="tel" autoComplete="tel" required maxLength={40} defaultValue={account?.phone ?? ''} className={fieldClass} />
           </label>
+          {account && account.addresses.length > 0 && (
+            <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
+              Saved address
+              <select value={addr?.id ?? ''} onChange={(e) => chooseSavedAddress(e.target.value)} className={fieldClass}>
+                <option value="">Enter a new address</option>
+                {account.addresses.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {(a.label ? `${a.label} — ` : '') + [a.street, a.area, a.city].filter(Boolean).join(', ')}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="flex flex-col gap-2 text-sm font-medium">
             City
             <select value={city} onChange={(e) => setCity(e.target.value)} className={fieldClass} autoComplete="address-level2">
@@ -360,7 +455,7 @@ export function BookingForm({
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium">
             Area
-            <select key={city} name="area" required className={fieldClass} defaultValue="">
+            <select key={`${city}-${fillKey}`} name="area" required className={fieldClass} defaultValue={addr?.city === city ? addr.area : ''}>
               <option value="" disabled>
                 Select area
               </option>
@@ -371,19 +466,19 @@ export function BookingForm({
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
             Street &amp; building
-            <input name="address" autoComplete="street-address" required maxLength={300} className={fieldClass} />
+            <input key={`address-${fillKey}`} name="address" autoComplete="street-address" required maxLength={300} defaultValue={addr?.street ?? ''} className={fieldClass} />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium">
             Apartment / villa no. <span className="font-normal text-muted-foreground">(optional)</span>
-            <input name="apartment" maxLength={50} className={fieldClass} />
+            <input key={`apartment-${fillKey}`} name="apartment" maxLength={50} defaultValue={addr?.apartment ?? ''} className={fieldClass} />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium">
             Building name <span className="font-normal text-muted-foreground">(optional)</span>
-            <input name="building" maxLength={100} className={fieldClass} />
+            <input key={`building-${fillKey}`} name="building" maxLength={100} defaultValue={addr?.building ?? ''} className={fieldClass} />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
             Directions <span className="font-normal text-muted-foreground">(optional)</span>
-            <input name="directions" maxLength={500} placeholder="Landmarks, gate code, parking…" className={fieldClass} />
+            <input key={`directions-${fillKey}`} name="directions" maxLength={500} placeholder="Landmarks, gate code, parking…" defaultValue={addr?.directions ?? ''} className={fieldClass} />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
             Notes for the technician <span className="font-normal text-muted-foreground">(optional)</span>
